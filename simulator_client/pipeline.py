@@ -38,6 +38,7 @@ class FallbackPipeline:
         self.tracker = KalmanTracker(process_noise=1.0, measurement_noise=0.5)
         self._last_time: float | None = None
         self._lost_count: int = 0
+        self._last_class_id: int | None = None
 
     def process_rgb_image(self, image: np.ndarray, camera_matrix: Matrix3x3, timestamp: float = 0.0) -> PipelineResult:
         try:
@@ -89,8 +90,11 @@ class FallbackPipeline:
 
             cur_x, cur_y, cur_z = positions[best_idx]
 
-            # TODO: optionally enable a hard reset here when `class_id` changes
+            current_class_id = good[best_idx].class_id
+            if self._last_class_id is not None and current_class_id != self._last_class_id:
+                self.tracker.reset()
 
+            self._last_class_id = current_class_id
             self.tracker.update(cur_x, cur_y, cur_z, dt)
             pred_x, pred_y, pred_z = self.tracker.predict(self.latency * self.latency_multiplier)
 

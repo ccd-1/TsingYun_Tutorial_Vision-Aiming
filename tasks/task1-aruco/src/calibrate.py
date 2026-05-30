@@ -31,29 +31,31 @@ def list_calibration_images():
 
 
 def create_board_points(pattern_size, square_size_meters):
-    # TODO(student): Build the 3D corner coordinates of your calibration board.
-    # cols, rows = pattern_size
-    # for each row from 0 to rows - 1:
-    #     for each col from 0 to cols - 1:
-    #         index = row * cols + col
-    #         x = col * square_size_meters
-    #         y = row * square_size_meters
-    #         z = 0 because the chessboard is a flat plane
-    #         points[index] = (x, y, z)
-    # return points as float32
-    raise NotImplementedError("create_board_points is not implemented")
+    cols, rows = pattern_size
+    points = np.zeros((rows * cols, 3), dtype=np.float32)
+    for row in range(rows):
+        for col in range(cols):
+            index = row * cols + col
+            x = col * square_size_meters
+            y = row * square_size_meters
+            z = 0 
+            points[index] = (x, y, z)
+    return points 
 
 
 def detect_calibration_points(gray_image, pattern_size):
-    # TODO(student): Detect and refine the calibration points in one image.
-    # flags = adaptive threshold + image normalization
-    # found, corners = cv2.findChessboardCorners(gray_image, pattern_size, flags)
-    # if found is false:
-    #     return false and an empty point array
-    # stop_criteria = max iterations plus sub-pixel epsilon threshold
-    # refined = cv2.cornerSubPix(gray_image, corners, window size, dead zone, stop_criteria)
-    # return true and refined corner positions
-    raise NotImplementedError("detect_calibration_points is not implemented")
+    if gray_image is None:
+        return False, np.empty((0, 2), dtype=np.float32)
+    flags = cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE
+    found, corners = cv2.findChessboardCorners(gray_image, pattern_size, flags=flags)
+    if not found:
+        return False, np.empty((0, 2), dtype=np.float32)
+
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 1e-3)
+    window_size = (11, 11)  
+    dead_zone = (-1, -1)
+    refined = cv2.cornerSubPix(gray_image, corners, window_size, dead_zone, criteria)
+    return True, refined
 
 
 def _is_valid_calibration_result(result):
@@ -81,7 +83,25 @@ def calibrate_camera(object_points, image_points, image_size):
     # if OpenCV fails or returns non-finite values:
     #     raise a clear error
     # return camera_matrix and dist_coeffs
-    raise NotImplementedError("calibrate_camera is not implemented")
+    if not object_points or not image_points:
+        raise ValueError("No object_points or image_points provided for calibration")
+
+    obj_pts = [np.asarray(op, dtype=np.float32) for op in object_points]
+    img_pts = [np.asarray(ip, dtype=np.float32) for ip in image_points]
+
+    if image_size is None:
+        raise ValueError("image_size must be provided")
+
+    flags = 0
+    try:
+        rms, camera_matrix, dist_coeffs, rvecs, tvecs = cv2.calibrateCamera(obj_pts, img_pts, image_size, None, None, flags=flags)
+    except cv2.error as e:
+        raise RuntimeError(f"OpenCV calibrateCamera failed: {e}")
+
+    if not _is_valid_calibration_result((camera_matrix, dist_coeffs)):
+        raise RuntimeError("Calibration produced invalid camera matrix or distortion coefficients")
+
+    return camera_matrix, dist_coeffs
 
 
 def save_camera_params(camera_matrix, dist_coeffs, image_size, output_path):

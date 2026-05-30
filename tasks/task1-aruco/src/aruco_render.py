@@ -126,7 +126,19 @@ def estimate_marker_pose(marker_corners, marker_length_meters, camera_matrix, di
     # Input: detected 2D marker corners, marker size, camera_matrix, and dist_coeffs.
     # Output: rvec and tvec.
     # `object_points` has already been prepared for you.
-    raise NotImplementedError("estimate_marker_pose is not implemented")
+    corners_2d = np.asarray(marker_corners, dtype=np.float32).reshape((4, 2))
+    success, rvec, tvec = cv2.solvePnP(
+        object_points,
+        corners_2d,
+        camera_matrix,
+        dist_coeffs,
+        flags=cv2.SOLVEPNP_IPPE_SQUARE,
+    )
+    if not success:
+        raise RuntimeError("solvePnP failed to estimate marker pose")
+    if not _is_valid_pose_result((rvec, tvec)):
+        raise RuntimeError("solvePnP returned invalid pose")
+    return rvec, tvec
 
 
 def render_virtual_object(frame, rvec, tvec, camera_matrix, dist_coeffs, vertices, faces):
@@ -143,8 +155,37 @@ def render_virtual_object(frame, rvec, tvec, camera_matrix, dist_coeffs, vertice
     # 5. Draw the triangle edges or filled triangle on frame.
     #
     # Model size normalization can be tricky at first; we recommend asking AI for help.
-    
-    raise NotImplementedError("render_virtual_object is not implemented")
+    verts = np.array(vertices, dtype=np.float32)
+    faces_arr = np.array(faces, dtype=np.int32)
+
+    if len(verts) == 0 or len(faces_arr) == 0:
+        return frame
+
+    min_vals = verts.min(axis=0)
+    max_vals = verts.max(axis=0)
+    center = (min_vals + max_vals) / 2.0
+    size = max_vals - min_vals
+    max_dim = float(max(size[0], size[1], size[2]))
+    if max_dim < 1e-9:
+        max_dim = 1.0
+
+    target_size = MARKER_LENGTH_METERS * 0.8
+    scale = target_size / max_dim
+
+    model_pts = (verts - center) * scale
+    model_pts[:, 2] -= float(model_pts[:, 2].min())
+
+    projected, _ = cv2.projectPoints(
+        model_pts.reshape(-1, 1, 3), rvec, tvec, camera_matrix, dist_coeffs
+    )
+    projected = projected.reshape(-1, 2)
+
+    for i0, i1, i2 in faces_arr:
+        tri = np.array([projected[i0], projected[i1], projected[i2]], dtype=np.int32)
+        cv2.fillPoly(frame, [tri], color=(80, 180, 80))
+        cv2.polylines(frame, [tri], isClosed=True, color=(0, 120, 0), thickness=1)
+
+    return frame
 
 
 def process_frame(frame, dictionary, camera_matrix, dist_coeffs, vertices, faces):

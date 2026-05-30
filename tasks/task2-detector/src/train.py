@@ -27,41 +27,86 @@ class MNISTClassifier(nn.Module):
 
     def __init__(self, input_size: int = 28 * 28, num_classes: int = 10) -> None:
         super().__init__()
-        # TODO(student): fill in your custom model architectures
-        raise NotImplementedError("MNIST classifier model logic not implemented!")
+        self.net = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(input_size, 128),
+            nn.ReLU(inplace=True),
+            nn.Linear(128, num_classes),
+        )
 
     def forward(self, inputs):
-        # TODO(student): fill in your forward process according to your model
-        raise NotImplementedError("MNIST classifier forward logic not implemented!")
+        return self.net(inputs)
 
 
 def select_training_device(torch_module) -> str:
-    # TODO(student): Pick the best accelerator available on the student's PC.
-    # if torch reports CUDA is available:
-    #     return "cuda" for NVIDIA GPU training
-    # else if torch reports MPS is available:
-    #     return "mps" for Apple Silicon GPU training
-    # otherwise:
-    #     return "cpu" so training still works without an accelerator
-    raise NotImplementedError("select_training_device is not implemented")
+    if getattr(torch_module, "cuda", None) is not None and torch_module.cuda.is_available():
+        return "cuda"
+
+    if getattr(getattr(torch_module, "backends", None), "mps", None) is not None and torch_module.backends.mps.is_available():
+        return "mps"
+
+    return "cpu"
 
 
 def train_mnist_classifier(dataset_dir: Path, output_path: Path) -> Path:
-    
     from torch.utils.data import DataLoader, random_split
     import torchvision
-    # TODO(student): Train the MNIST digit classifier used by model.py.
-    # device = select_training_device(torch)
-    # move the model and each batch to device
-    # read training images and labels from dataset_dir
-    # split examples into training and validation sets
-    # preprocess every image the same way model.preprocess_mnist_crop does
-    # model = MNISTClassifier()
-    # choose loss function, optimizer, batch size, and number of epochs
-    # train until validation accuracy is stable
-    # save the trained model weights or serialized estimator to output_path
-    # return output_path
-    raise NotImplementedError("MNIST training is not implemented")
+    from torchvision.transforms import ToTensor
+
+    device_str = select_training_device(torch)
+    device = torch.device(device_str)
+
+    if not dataset_dir.exists():
+        dataset_dir.mkdir(parents=True, exist_ok=True)
+
+    transform = ToTensor()
+    train_dataset = torchvision.datasets.MNIST(root=dataset_dir, train=True, download=True, transform=transform)
+    if len(train_dataset) == 0:
+        raise RuntimeError(f"MNIST training dataset contains no examples in {dataset_dir}")
+
+    val_size = int(len(train_dataset) * 0.1)
+    train_size = len(train_dataset) - val_size
+    train_split, val_split = random_split(train_dataset, [train_size, val_size], generator=torch.Generator().manual_seed(42))
+
+    train_loader = DataLoader(train_split, batch_size=128, shuffle=True, num_workers=2, pin_memory=(device_str != "cpu"))
+    val_loader = DataLoader(val_split, batch_size=256, shuffle=False, num_workers=2, pin_memory=(device_str != "cpu"))
+
+    model = MNISTClassifier().to(device)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+    best_val_accuracy = 0.0
+    epochs = 5
+    for epoch in range(epochs):
+        model.train()
+        for images, labels in train_loader:
+            images = images.to(device, dtype=torch.float32)
+            labels = labels.to(device)
+            logits = model(images)
+            loss = criterion(logits, labels)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+        model.eval()
+        correct = 0
+        total = 0
+        with torch.no_grad():
+            for images, labels in val_loader:
+                images = images.to(device, dtype=torch.float32)
+                labels = labels.to(device)
+                logits = model(images)
+                preds = torch.argmax(logits, dim=1)
+                correct += (preds == labels).sum().item()
+                total += labels.size(0)
+
+        val_accuracy = correct / total if total > 0 else 0.0
+        best_val_accuracy = max(best_val_accuracy, val_accuracy)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    state = {k: v.cpu().numpy() for k, v in model.state_dict().items()}
+    np.savez(output_path, state_dict=state)
+    return output_path
 
 
 def parse_args() -> argparse.Namespace:

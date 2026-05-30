@@ -19,7 +19,11 @@ def _library_path() -> Path:
 
     if sys.platform == "win32":
         build_dir = Path(env_dir) if env_dir else REPO_ROOT / "build" / "hw-ninja"
-        return build_dir / "tasks" / "task3-tracker" / "libhw_task3_tracker_shared.dll"
+        # Try Release directory first (MSVC), then root (Ninja)
+        candidate = build_dir / "tasks" / "task3-tracker" / "Release" / "hw_task3_tracker_shared.dll"
+        if candidate.exists():
+            return candidate
+        return build_dir / "tasks" / "task3-tracker" / "hw_task3_tracker_shared.dll"
 
     build_dir = Path(env_dir) if env_dir else REPO_ROOT / "build" / "hw"
     return build_dir / "tasks" / "task3-tracker" / "libhw_task3_tracker_shared.so"
